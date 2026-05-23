@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::utility::load_files;
 
-struct File {
+struct RawFile {
     name: String,
     path: PathBuf,
 }
@@ -39,7 +39,7 @@ enum AppMode {
     },
 }
 struct App {
-    items: Vec<File>,
+    items: Vec<RawFile>,
     idx: usize,
     parsed_file: Option<ParsedDesktopFile>,
     mode: AppMode,
