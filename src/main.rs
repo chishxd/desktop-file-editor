@@ -1,3 +1,5 @@
+mod utility;
+
 use std::path::PathBuf;
 
 use crossterm::event::{self, KeyCode};
@@ -8,6 +10,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{List, ListState},
 };
+
+use crate::utility::load_files;
 
 struct File {
     name: String,
@@ -43,13 +47,22 @@ struct App {
 
 fn main() -> std::io::Result<()> {
     let mut list_state = ListState::default().with_selected(Some(0));
+    let mut app = App {
+        items: load_files()?,
+        idx: 0,
+        parsed_file: None,
+        mode: AppMode::Browse,
+    };
+
     ratatui::run(|terminal| {
         loop {
-            terminal.draw(|frame| render(frame, &mut list_state))?;
+            terminal.draw(|frame| render(&mut app, frame, &mut list_state))?;
             if let Some(key) = event::read()?.as_key_press_event() {
                 match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => list_state.select_next(),
-                    KeyCode::Char('k') | KeyCode::Up => list_state.select_previous(),
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        app.idx = (app.idx + 1).min(app.items.len().saturating_sub(1));
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => app.idx = (app.idx - 1).saturating_sub(1),
                     KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
                     _ => {}
                 }
@@ -58,7 +71,7 @@ fn main() -> std::io::Result<()> {
     })
 }
 
-fn render(frame: &mut Frame, list_state: &mut ListState) {
+fn render(app: &mut App, frame: &mut Frame, list_state: &mut ListState) {
     let constraints = [Constraint::Length(1), Constraint::Fill(1)];
     let layout = Layout::vertical(constraints).spacing(1);
     let [top, first] = frame.area().layout(&layout);
@@ -69,12 +82,13 @@ fn render(frame: &mut Frame, list_state: &mut ListState) {
     ]);
     frame.render_widget(title.centered(), top);
 
-    render_list(frame, first, list_state);
+    let names: Vec<String> = app.items.iter().map(|f| f.name.clone()).collect();
+
+    list_state.select(Some(app.idx));
+    render_list(names, frame, first, list_state);
 }
 
-fn render_list(frame: &mut Frame, area: Rect, list_state: &mut ListState) {
-    let items = ["App 1", "App 2", "App 3", "App 4"];
-
+fn render_list(items: Vec<String>, frame: &mut Frame, area: Rect, list_state: &mut ListState) {
     let list = List::new(items)
         .style(Color::White)
         .highlight_style(Modifier::REVERSED)
