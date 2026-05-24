@@ -8,16 +8,17 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Stylize},
     text::{Line, Span},
-    widgets::{List, ListState},
+    widgets::{List, ListState, Paragraph},
 };
 
-use crate::utility::load_files;
+use crate::utility::{load_files, parse_file};
 
 struct RawFile {
     name: String,
     path: PathBuf,
 }
 
+#[derive(Debug)]
 struct ParsedDesktopFile {
     name: String,
     exec: String,
@@ -54,15 +55,23 @@ fn main() -> std::io::Result<()> {
         mode: AppMode::Browse,
     };
 
+    parse_current(&mut app);
+
     ratatui::run(|terminal| {
         loop {
             terminal.draw(|frame| render(&mut app, frame, &mut list_state))?;
             if let Some(key) = event::read()?.as_key_press_event() {
                 match key.code {
                     KeyCode::Char('j') | KeyCode::Down => {
-                        app.idx = (app.idx + 1).min(app.items.len().saturating_sub(1));
+                        if !app.items.is_empty() {
+                            app.idx = (app.idx + 1).min(app.items.len() - 1);
+                            parse_current(&mut app);
+                        }
                     }
-                    KeyCode::Char('k') | KeyCode::Up => app.idx = (app.idx - 1).saturating_sub(1),
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        app.idx = app.idx.saturating_sub(1);
+                        parse_current(&mut app);
+                    }
                     KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
                     _ => {}
                 }
@@ -72,27 +81,82 @@ fn main() -> std::io::Result<()> {
 }
 
 fn render(app: &mut App, frame: &mut Frame, list_state: &mut ListState) {
-    let constraints = [Constraint::Length(1), Constraint::Fill(1)];
-    let layout = Layout::vertical(constraints).spacing(1);
-    let [top, first] = frame.area().layout(&layout);
+    let vertical = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).spacing(1);
+    let [title_area, body_area] = frame.area().layout(&vertical);
+
+    let cols = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .spacing(1)
+        .split(body_area);
+    let left = cols[0];
+    let right = cols[1];
 
     let title = Line::from_iter([
-        Span::from("List Widget").bold(),
-        Span::from(" (Press 'q' to quit and arrow keys to navigate)"),
+        Span::from("Desktop File Editor").bold(),
+        Span::from("  q: quit  j/k: move  enter: edit"),
     ]);
-    frame.render_widget(title.centered(), top);
+    frame.render_widget(title.centered(), title_area);
 
     let names: Vec<String> = app.items.iter().map(|f| f.name.clone()).collect();
-
     list_state.select(Some(app.idx));
-    render_list(names, frame, first, list_state);
+    render_list(names, frame, left, list_state);
+
+    match app.mode {
+        AppMode::Browse => render_desktop_editor(app, frame, right),
+        AppMode::Edit { .. } => render_editor(app, frame, right),
+    }
 }
 
 fn render_list(items: Vec<String>, frame: &mut Frame, area: Rect, list_state: &mut ListState) {
-    let list = List::new(items)
-        .style(Color::White)
-        .highlight_style(Modifier::REVERSED)
-        .highlight_symbol("> ");
+    if !items.is_empty() {
+        let list = List::new(items)
+            .style(Color::White)
+            .highlight_style(Modifier::REVERSED)
+            .highlight_symbol("> ");
+        frame.render_stateful_widget(list, area, list_state);
+    } else {
+        frame.render_widget("No files found", frame.area());
+    }
+}
 
-    frame.render_stateful_widget(list, area, list_state);
+fn render_desktop_editor(app: &mut App, frame: &mut Frame, area: Rect) {
+    let text: Vec<Line<'static>> = match app.parsed_file.as_ref() {
+        Some(file) => vec![
+            format!("Name: {}", file.name).into(),
+            format!("Exec: {}", file.exec).into(),
+            format!("Icon: {}", file.icon).into(),
+        ],
+        None => vec!["No file selected".into()],
+    };
+
+    let paragraph = Paragraph::new(text).block(
+        ratatui::widgets::Block::default()
+            .title("Details")
+            .borders(ratatui::widgets::Borders::ALL),
+    );
+    frame.render_widget(paragraph, area);
+}
+
+fn render_editor(app: &mut App, frame: &mut Frame, area: Rect) {
+    let lines: Vec<Line<'static>> = match app.parsed_file.as_ref() {
+        Some(file) => vec![
+            format!("Editing: {}", file.name).into(),
+            "Type text, enter to save, esc to cancel".into(),
+        ],
+        None => vec!["Nothing to edit".into()],
+    };
+
+    let paragraph = Paragraph::new(lines).block(
+        ratatui::widgets::Block::default()
+            .title("Editor")
+            .borders(ratatui::widgets::Borders::ALL),
+    );
+
+    frame.render_widget(paragraph, area);
+}
+
+fn parse_current(app: &mut App) {
+    app.parsed_file = app
+        .items
+        .get(app.idx)
+        .and_then(|f| parse_file(&f.path).ok());
 }
