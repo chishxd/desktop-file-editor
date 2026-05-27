@@ -61,19 +61,46 @@ fn main() -> std::io::Result<()> {
         loop {
             terminal.draw(|frame| render(&mut app, frame, &mut list_state))?;
             if let Some(key) = event::read()?.as_key_press_event() {
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        if !app.items.is_empty() {
-                            app.idx = (app.idx + 1).min(app.items.len() - 1);
+                match &mut app.mode {
+                    AppMode::Browse => match key.code {
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            if !app.items.is_empty() {
+                                app.idx = (app.idx + 1).min(app.items.len() - 1);
+                                parse_current(&mut app);
+                            }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            app.idx = app.idx.saturating_sub(1);
                             parse_current(&mut app);
                         }
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        app.idx = app.idx.saturating_sub(1);
-                        parse_current(&mut app);
-                    }
-                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                    _ => {}
+                        KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                        KeyCode::Enter => {
+                            if let Some(parsed_file) = &app.parsed_file {
+                                let edit_state = EditState {
+                                    key: "Name".to_string(),
+                                    value: parsed_file.name.clone(),
+                                    buf: parsed_file.name.clone(),
+                                };
+
+                                app.mode = AppMode::Edit {
+                                    file_idx: app.idx,
+                                    field: "Name".to_string(),
+                                    editing_state: edit_state,
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
+                    AppMode::Edit { editing_state, .. } => match key.code {
+                        KeyCode::Char(c) => {
+                            editing_state.buf.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            editing_state.buf.pop();
+                        }
+                        KeyCode::Esc => app.mode = AppMode::Browse,
+                        _ => {}
+                    },
                 }
             }
         }
