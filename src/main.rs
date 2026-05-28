@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, List, ListState, Paragraph, canvas::Label},
+    widgets::{Block, List, ListState, Paragraph},
 };
 use ratatui_textarea::{CursorMove, Input, TextArea};
 
@@ -24,12 +24,6 @@ struct ParsedDesktopFile {
     name: String,
     exec: String,
     icon: String,
-}
-
-struct EditState {
-    key: String,
-    value: String,
-    buf: String,
 }
 
 enum AppMode {
