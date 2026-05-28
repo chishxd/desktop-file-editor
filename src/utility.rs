@@ -7,7 +7,7 @@ use std::{
 
 use crate::{ParsedDesktopFile, RawFile};
 
-fn is_desktop(p: &PathBuf) -> bool {
+fn is_desktop(p: &Path) -> bool {
     p.is_file() && p.extension().map(|s| s == "desktop").unwrap_or(false)
 }
 
@@ -21,17 +21,38 @@ fn build_file(path: PathBuf) -> Option<RawFile> {
 }
 
 pub fn load_files() -> std::io::Result<Vec<RawFile>> {
-    let mut out: Vec<RawFile> = Vec::new();
-
-    let local_dir = PathBuf::from(std::env::var("HOME").unwrap()).join(".local/share/applications");
+    let mut map: HashMap<String, RawFile> = HashMap::new();
 
     for entry in fs::read_dir("/usr/share/applications/")? {
         let entry = entry?;
         if let Some(file) = build_file(entry.path()) {
-            out.push(file);
+            let key = file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            map.insert(key, file);
         }
     }
-    Ok(out)
+    let local_dir = PathBuf::from(std::env::var("HOME").unwrap()).join(".local/share/applications");
+    if local_dir.is_dir() {
+        for entry in fs::read_dir(local_dir)? {
+            let entry = entry?;
+            if let Some(file) = build_file(entry.path()) {
+                let key = file
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                map.insert(key, file);
+            }
+        }
+    }
+    let mut files: Vec<RawFile> = map.into_values().collect();
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(files)
 }
 
 pub fn parse_file(file_p: &Path) -> Result<ParsedDesktopFile, std::io::Error> {

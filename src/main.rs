@@ -1,6 +1,9 @@
 mod utility;
 
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use crossterm::event::{self, KeyCode};
 use ratatui::{
@@ -39,6 +42,9 @@ struct App {
     idx: usize,
     parsed_file: Option<ParsedDesktopFile>,
     mode: AppMode,
+    status_message: Option<String>,
+    status_style: Style,
+    status_created: Option<std::time::Instant>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -54,6 +60,9 @@ impl App {
             idx: 0,
             parsed_file: None,
             mode: AppMode::Browse,
+            status_created: None,
+            status_message: None,
+            status_style: Style::default(),
         };
 
         app.parse_current();
@@ -63,85 +72,107 @@ impl App {
     fn run(mut self, list_state: &mut ListState) -> std::io::Result<()> {
         ratatui::run(|terminal| {
             loop {
+                self.clear_status_msg();
                 terminal.draw(|frame| self.render(frame, list_state))?;
 
-                if let Some(key) = event::read()?.as_key_press_event() {
-                    match &mut self.mode {
-                        AppMode::Browse => match key.code {
-                            KeyCode::Char('j') | KeyCode::Down => {
-                                if !self.items.is_empty() {
-                                    self.idx = (self.idx + 1).min(self.items.len() - 1);
+                if event::poll(Duration::from_millis(100))? {
+                    if let Some(key) = event::read()?.as_key_press_event() {
+                        match &mut self.mode {
+                            AppMode::Browse => match key.code {
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    if !self.items.is_empty() {
+                                        self.idx = (self.idx + 1).min(self.items.len() - 1);
+                                        self.parse_current();
+                                    }
+                                }
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    self.idx = self.idx.saturating_sub(1);
                                     self.parse_current();
                                 }
-                            }
-                            KeyCode::Char('k') | KeyCode::Up => {
-                                self.idx = self.idx.saturating_sub(1);
-                                self.parse_current();
-                            }
-                            KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                            KeyCode::Enter => {
-                                if let Some(parsed_file) = &self.parsed_file {
-                                    let mut name = TextArea::from(vec![parsed_file.name.clone()]);
-                                    let mut exec = TextArea::from(vec![parsed_file.exec.clone()]);
-                                    let mut icon = TextArea::from(vec![parsed_file.icon.clone()]);
+                                KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                                KeyCode::Enter => {
+                                    if let Some(parsed_file) = &self.parsed_file {
+                                        let mut name =
+                                            TextArea::from(vec![parsed_file.name.clone()]);
+                                        let mut exec =
+                                            TextArea::from(vec![parsed_file.exec.clone()]);
+                                        let mut icon =
+                                            TextArea::from(vec![parsed_file.icon.clone()]);
 
-                                    for ta in [&mut name, &mut exec, &mut icon] {
-                                        ta.set_cursor_line_style(Style::default());
-                                        ta.set_cursor_style(
-                                            Style::default().add_modifier(Modifier::REVERSED),
-                                        );
-                                        ta.move_cursor(CursorMove::End)
-                                    }
+                                        for ta in [&mut name, &mut exec, &mut icon] {
+                                            ta.set_cursor_line_style(Style::default());
+                                            ta.set_cursor_style(
+                                                Style::default().add_modifier(Modifier::REVERSED),
+                                            );
+                                            ta.move_cursor(CursorMove::End)
+                                        }
 
-                                    self.mode = AppMode::Edit {
-                                        file_idx: self.idx,
-                                        active_field: 0,
-                                        textareas: vec![name, exec, icon],
+                                        self.mode = AppMode::Edit {
+                                            file_idx: self.idx,
+                                            active_field: 0,
+                                            textareas: vec![name, exec, icon],
+                                        }
                                     }
                                 }
-                            }
-                            _ => {}
-                        },
-                        AppMode::Edit {
-                            file_idx,
-                            active_field,
-                            textareas,
-                            ..
-                        } => match key.code {
-                            KeyCode::Tab | KeyCode::Down => {
-                                *active_field = (*active_field + 1) % textareas.len();
-                            }
-                            KeyCode::Up => {
-                                *active_field = active_field.saturating_sub(1);
-                            }
-                            KeyCode::Esc => self.mode = AppMode::Browse,
-                            KeyCode::Enter => {
-                                let new_name = textareas[0].lines()[0].clone();
-                                let new_exec = textareas[1].lines()[0].clone();
-                                let new_icon = textareas[2].lines()[0].clone();
+                                _ => {}
+                            },
+                            AppMode::Edit {
+                                file_idx,
+                                active_field,
+                                textareas,
+                                ..
+                            } => match key.code {
+                                KeyCode::Tab | KeyCode::Down => {
+                                    *active_field = (*active_field + 1) % textareas.len();
+                                }
+                                KeyCode::Up => {
+                                    *active_field = active_field.saturating_sub(1);
+                                }
+                                KeyCode::Esc => self.mode = AppMode::Browse,
+                                KeyCode::Enter => {
+                                    let new_name = textareas[0].lines()[0].clone();
+                                    let new_exec = textareas[1].lines()[0].clone();
+                                    let new_icon = textareas[2].lines()[0].clone();
 
-                                let update_file = {
-                                    let file = self.parsed_file.as_mut().unwrap();
-                                    file.name = new_name;
-                                    file.exec = new_exec;
-                                    file.icon = new_icon;
-                                    file.clone()
-                                };
+                                    let update_file = {
+                                        let file = self.parsed_file.as_mut().unwrap();
+                                        file.name = new_name;
+                                        file.exec = new_exec;
+                                        file.icon = new_icon;
+                                        file.clone()
+                                    };
 
-                                utility::save_desktop_file(
-                                    &self.items[*file_idx].path,
-                                    &update_file,
-                                )?;
-                            }
-                            _ => {
-                                let input: Input = key.into();
-                                textareas[*active_field].input(input);
-                            }
-                        },
+                                    utility::save_desktop_file(
+                                        &self.items[*file_idx].path,
+                                        &update_file,
+                                    )?;
+                                    self.status_message = Some(format!(
+                                        "Saved to ~/.local/share/applications/{}",
+                                        self.items[*file_idx].name
+                                    ));
+                                    self.status_style = Style::default().fg(Color::Green);
+                                    self.status_created = Some(Instant::now());
+                                }
+                                _ => {
+                                    let input: Input = key.into();
+                                    textareas[*active_field].input(input);
+                                }
+                            },
+                        }
                     }
                 }
             }
         })
+    }
+
+    fn clear_status_msg(&mut self) {
+        if self
+            .status_created
+            .is_some_and(|created| created.elapsed() >= Duration::from_secs(2))
+        {
+            self.status_created = None;
+            self.status_message = None;
+        }
     }
 
     fn parse_current(&mut self) {
@@ -162,7 +193,7 @@ impl App {
 
         let title = Line::from_iter([
             Span::from("Desktop File Editor").bold(),
-            Span::from("  q: quit  j/k: move  enter: edit"),
+            Span::from("  q: quit  up/down: move  enter: edit"),
         ]);
         frame.render_widget(title.centered(), title_area);
 
@@ -173,6 +204,17 @@ impl App {
         match self.mode {
             AppMode::Browse => self.render_details(frame, right),
             AppMode::Edit { .. } => self.render_editor(frame, right),
+        }
+
+        let footer_area = Layout::vertical([
+            Constraint::Min(0),    // existing body
+            Constraint::Length(1), // status line
+        ])
+        .split(frame.area())[1]; // get the bottom 1-line area
+
+        if let Some(msg) = &self.status_message {
+            let paragraph = Paragraph::new(msg.as_str()).style(self.status_style);
+            frame.render_widget(paragraph, footer_area);
         }
     }
 
@@ -233,11 +275,11 @@ impl App {
             for (i, (ta, label)) in textareas.iter().zip(labels).enumerate() {
                 let block = if i == *active_field {
                     Block::bordered()
-                        .title(format!("{}", label))
+                        .title(label.to_string())
                         .style(Style::default().fg(Color::Yellow))
                 } else {
                     Block::bordered()
-                        .title(format!("{}", label))
+                        .title(label.to_string())
                         .style(Style::default().fg(Color::DarkGray))
                 };
 
