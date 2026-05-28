@@ -6,10 +6,11 @@ use crossterm::event::{self, KeyCode};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{List, ListState, Paragraph},
+    widgets::{Block, List, ListState, Paragraph, canvas::Label},
 };
+use ratatui_textarea::{CursorMove, Input, TextArea};
 
 use crate::utility::{load_files, parse_file};
 
@@ -35,8 +36,8 @@ enum AppMode {
     Browse,
     Edit {
         file_idx: usize,
-        field: String,
-        editing_state: EditState,
+        active_field: usize,
+        textareas: Vec<TextArea<'static>>,
     },
 }
 struct App {
@@ -86,30 +87,43 @@ impl App {
                             KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
                             KeyCode::Enter => {
                                 if let Some(parsed_file) = &self.parsed_file {
-                                    let edit_state = EditState {
-                                        key: "Name".to_string(),
-                                        value: parsed_file.name.clone(),
-                                        buf: parsed_file.name.clone(),
-                                    };
+                                    let mut name = TextArea::from(vec![parsed_file.name.clone()]);
+                                    let mut exec = TextArea::from(vec![parsed_file.exec.clone()]);
+                                    let mut icon = TextArea::from(vec![parsed_file.icon.clone()]);
+
+                                    for ta in [&mut name, &mut exec, &mut icon] {
+                                        ta.set_cursor_line_style(Style::default());
+                                        ta.set_cursor_style(
+                                            Style::default().add_modifier(Modifier::REVERSED),
+                                        );
+                                        ta.move_cursor(CursorMove::End)
+                                    }
 
                                     self.mode = AppMode::Edit {
                                         file_idx: self.idx,
-                                        field: "Name".to_string(),
-                                        editing_state: edit_state,
+                                        active_field: 0,
+                                        textareas: vec![name, exec, icon],
                                     }
                                 }
                             }
                             _ => {}
                         },
-                        AppMode::Edit { editing_state, .. } => match key.code {
-                            KeyCode::Char(c) => {
-                                editing_state.buf.push(c);
+                        AppMode::Edit {
+                            active_field,
+                            textareas,
+                            ..
+                        } => match key.code {
+                            KeyCode::Tab | KeyCode::Down => {
+                                *active_field = (*active_field + 1) % textareas.len();
                             }
-                            KeyCode::Backspace => {
-                                editing_state.buf.pop();
+                            KeyCode::Up => {
+                                *active_field = *&active_field.saturating_sub(1);
                             }
                             KeyCode::Esc => self.mode = AppMode::Browse,
-                            _ => {}
+                            _ => {
+                                let input: Input = key.into();
+                                textareas[*active_field].input(input);
+                            }
                         },
                     }
                 }
@@ -144,7 +158,7 @@ impl App {
         self.render_list(names, frame, left, list_state);
 
         match self.mode {
-            AppMode::Browse => self.render_desktop_editor(frame, right),
+            AppMode::Browse => self.render_details(frame, right),
             AppMode::Edit { .. } => self.render_editor(frame, right),
         }
     }
@@ -167,7 +181,7 @@ impl App {
         }
     }
 
-    fn render_desktop_editor(&self, frame: &mut Frame, area: Rect) {
+    fn render_details(&self, frame: &mut Frame, area: Rect) {
         let text: Vec<Line<'static>> = match self.parsed_file.as_ref() {
             Some(file) => vec![
                 format!("Name: {}", file.name).into(),
@@ -184,21 +198,40 @@ impl App {
         );
         frame.render_widget(paragraph, area);
     }
+
     fn render_editor(&self, frame: &mut Frame, area: Rect) {
-        let lines: Vec<Line<'static>> = match self.parsed_file.as_ref() {
-            Some(file) => vec![
-                format!("Editing: {}", file.name).into(),
-                "Type text, enter to save, esc to cancel".into(),
-            ],
-            None => vec!["Nothing to edit".into()],
-        };
+        let rows = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ])
+        .split(area);
 
-        let paragraph = Paragraph::new(lines).block(
-            ratatui::widgets::Block::default()
-                .title("Editor")
-                .borders(ratatui::widgets::Borders::ALL),
-        );
+        frame.render_widget("Edit Fields (Tab to switch, Esc to cancel)", rows[0]);
 
-        frame.render_widget(paragraph, area);
+        if let AppMode::Edit {
+            active_field,
+            textareas,
+            ..
+        } = &self.mode
+        {
+            let labels = ["Name", "Exec", "Icon"];
+            for (i, (ta, label)) in textareas.iter().zip(labels).enumerate() {
+                let block = if i == *active_field {
+                    Block::bordered()
+                        .title(format!("{}", label))
+                        .style(Style::default().fg(Color::Yellow))
+                } else {
+                    Block::bordered()
+                        .title(format!("{}", label))
+                        .style(Style::default().fg(Color::DarkGray))
+                };
+
+                let mut ta_clone = ta.clone();
+                ta_clone.set_block(block);
+                frame.render_widget(&ta_clone, rows[i + 1]);
+            }
+        }
     }
 }
