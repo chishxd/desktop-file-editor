@@ -23,6 +23,8 @@ fn build_file(path: PathBuf) -> Option<RawFile> {
 pub fn load_files() -> std::io::Result<Vec<RawFile>> {
     let mut out: Vec<RawFile> = Vec::new();
 
+    let local_dir = PathBuf::from(std::env::var("HOME").unwrap()).join(".local/share/applications");
+
     for entry in fs::read_dir("/usr/share/applications/")? {
         let entry = entry?;
         if let Some(file) = build_file(entry.path()) {
@@ -96,12 +98,32 @@ fn locale_candidates_from_env() -> Vec<String> {
     }
     cands
 }
-// #[cfg(test)]
-// mod test {
-//     use super::*;
 
-//     // #[test]
-//     // fn test_parse_file() {
-//     //     parse_file();
-//     // }
-// }
+pub fn save_desktop_file(
+    path: &Path,
+    new_values: &ParsedDesktopFile,
+) -> Result<(), std::io::Error> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+
+    for line in &mut lines {
+        if line.starts_with("Name=") {
+            *line = format!("Name={}", new_values.name);
+        } else if line.starts_with("Exec") {
+            *line = format!("Exec={}", new_values.exec);
+        } else if line.starts_with("Icon") {
+            *line = format!("Icon={}", new_values.icon);
+        }
+    }
+
+    let home = std::env::var("HOME").expect("HOME not set");
+    let dest_dir = std::path::PathBuf::from(format!("{}/.local/share/applications", home));
+    std::fs::create_dir_all(&dest_dir)?;
+    let filename = path.file_name().unwrap(); // e.g., "firefox.desktop"
+    let dest_path = dest_dir.join(filename);
+
+    let content = lines.join("\n") + "\n";
+    std::fs::write(dest_path, content)?;
+    Ok(())
+}

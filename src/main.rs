@@ -19,7 +19,7 @@ struct RawFile {
     path: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ParsedDesktopFile {
     name: String,
     exec: String,
@@ -103,6 +103,7 @@ impl App {
                             _ => {}
                         },
                         AppMode::Edit {
+                            file_idx,
                             active_field,
                             textareas,
                             ..
@@ -111,9 +112,27 @@ impl App {
                                 *active_field = (*active_field + 1) % textareas.len();
                             }
                             KeyCode::Up => {
-                                *active_field = *&active_field.saturating_sub(1);
+                                *active_field = active_field.saturating_sub(1);
                             }
                             KeyCode::Esc => self.mode = AppMode::Browse,
+                            KeyCode::Enter => {
+                                let new_name = textareas[0].lines()[0].clone();
+                                let new_exec = textareas[1].lines()[0].clone();
+                                let new_icon = textareas[2].lines()[0].clone();
+
+                                let update_file = {
+                                    let file = self.parsed_file.as_mut().unwrap();
+                                    file.name = new_name;
+                                    file.exec = new_exec;
+                                    file.icon = new_icon;
+                                    file.clone()
+                                };
+
+                                utility::save_desktop_file(
+                                    &self.items[*file_idx].path,
+                                    &update_file,
+                                )?;
+                            }
                             _ => {
                                 let input: Input = key.into();
                                 textareas[*active_field].input(input);
