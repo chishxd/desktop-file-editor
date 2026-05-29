@@ -18,6 +18,7 @@ After I am done with all basic features, I will also publish pre-built binaries 
 - Easy To Use
 - I guess it has good UI
 - Lightweight & fast
+- Search the .desktop files directly in TUI
 - Updates Desktop Database automatically. Make sure you have desktop-file-utils.
 
 ## License
