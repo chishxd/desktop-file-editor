@@ -2,7 +2,7 @@
 A small TUI app written in rust to edit `.desktop` files for your app launcher on the go.
 Built using **Ratatui** & **Crossterm-backend**
 
-<!-- TODO: Add A GIF of project -->
+![showcase](showcase.gif)
 
 ## Installation
 I havent yet published on Cargo so for now...
@@ -18,6 +18,7 @@ After I am done with all basic features, I will also publish pre-built binaries 
 - Easy To Use
 - I guess it has good UI
 - Lightweight & fast
+- Updates Desktop Database automatically. Make sure you have desktop-file-utils.
 
 ## License
 I am using [MIT](LICENSE) License for the project
