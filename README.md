@@ -5,8 +5,14 @@ Built using **Ratatui** & **Crossterm-backend**
 ![showcase](assets/showcase.gif)
 
 ## Installation
-I havent yet published on Cargo so for now...
+Binary is on Cargo now!
+```sh
+cargo install desktop-file-editor
+# Run the binary
+dfe
 ```
+
+```sh
 git clone https://codeberg.org/chish/desktop-file-editor && cd desktop-file-editor
 
 #Run The project 
