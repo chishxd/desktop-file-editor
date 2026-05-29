@@ -1,7 +1,7 @@
 mod utility;
 
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -15,11 +15,17 @@ use ratatui::{
 };
 use ratatui_textarea::{CursorMove, Input, TextArea};
 
-use crate::utility::{load_files, parse_file};
+use crate::utility::{load_files, parse_file, spawn_update_desktop_database};
 
 struct RawFile {
     name: String,
     path: PathBuf,
+}
+
+enum DbUpdateResult {
+    Updated,
+    MissingBinary,
+    Failed(String),
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +51,7 @@ struct App {
     status_message: Option<String>,
     status_style: Style,
     status_created: Option<std::time::Instant>,
+    status_job: Option<std::sync::mpsc::Receiver<DbUpdateResult>>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -63,6 +70,7 @@ impl App {
             status_created: None,
             status_message: None,
             status_style: Style::default(),
+            status_job: None,
         };
 
         app.parse_current();
@@ -73,6 +81,7 @@ impl App {
         ratatui::run(|terminal| {
             loop {
                 self.clear_status_msg();
+                self.poll_status_job();
                 terminal.draw(|frame| self.render(frame, list_state))?;
 
                 if event::poll(Duration::from_millis(100))? {
@@ -150,8 +159,11 @@ impl App {
                                         "Saved to ~/.local/share/applications/{}",
                                         self.items[*file_idx].name
                                     ));
+
+                                    let rx = spawn_update_desktop_database();
+                                    self.status_job = Some(rx);
                                     self.status_style = Style::default().fg(Color::Green);
-                                    self.status_created = Some(Instant::now());
+                                    // self.status_created = Some(Instant::now());
                                 }
                                 _ => {
                                     let input: Input = key.into();
@@ -166,12 +178,57 @@ impl App {
     }
 
     fn clear_status_msg(&mut self) {
+        if self.status_job.is_some() {
+            return;
+        }
+
         if self
             .status_created
             .is_some_and(|created| created.elapsed() >= Duration::from_secs(2))
         {
             self.status_created = None;
             self.status_message = None;
+        }
+    }
+
+    fn poll_status_job(&mut self) {
+        if let Some(rx) = &self.status_job {
+            use std::sync::mpsc::TryRecvError;
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.status_job = None;
+
+                    let base = self
+                        .status_message
+                        .clone()
+                        .unwrap_or_else(|| "Saved".to_string());
+
+                    match result {
+                        DbUpdateResult::Updated => {
+                            self.status_message =
+                                Some(format!("{} — Desktop database updated", base));
+                            self.status_style = Style::default().fg(Color::Green);
+                        }
+                        DbUpdateResult::MissingBinary => {
+                            self.status_message =
+                                Some(format!("{} — update-desktop-database not installed", base));
+                            self.status_style = Style::default().fg(Color::Yellow);
+                        }
+                        DbUpdateResult::Failed(err) => {
+                            self.status_message =
+                                Some(format!("{} — database update failed: {}", base, err));
+                            self.status_style = Style::default().fg(Color::Red);
+                        }
+                    }
+
+                    // start the expiry timer now that the job completed
+                    self.status_created = Some(Instant::now());
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.status_job = None;
+                }
+            }
         }
     }
 

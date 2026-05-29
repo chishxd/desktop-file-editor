@@ -3,9 +3,10 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    sync::mpsc,
 };
 
-use crate::{ParsedDesktopFile, RawFile};
+use crate::{DbUpdateResult, ParsedDesktopFile, RawFile};
 
 fn is_desktop(p: &Path) -> bool {
     p.is_file() && p.extension().map(|s| s == "desktop").unwrap_or(false)
@@ -147,4 +148,28 @@ pub fn save_desktop_file(
     let content = lines.join("\n") + "\n";
     std::fs::write(dest_path, content)?;
     Ok(())
+}
+
+pub fn spawn_update_desktop_database() -> mpsc::Receiver<DbUpdateResult> {
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let result = std::process::Command::new("update-desktop-database")
+            .arg(format!(
+                "{}/.local/share/applications",
+                std::env::var("HOME").unwrap()
+            ))
+            .status();
+
+        let message = match result {
+            Ok(status) if status.success() => DbUpdateResult::Updated,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => DbUpdateResult::MissingBinary,
+            Err(err) => DbUpdateResult::Failed(err.to_string()),
+            Ok(status) => DbUpdateResult::Failed(format!("exit status: {status}")),
+        };
+
+        let _ = tx.send(message);
+    });
+
+    rx
 }
