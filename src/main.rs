@@ -44,6 +44,7 @@ enum AppMode {
         file_idx: usize,
         active_field: usize,
         textareas: Vec<TextArea<'static>>,
+        search_input: Option<TextArea<'static>>,
     },
 }
 struct App {
@@ -100,10 +101,34 @@ impl App {
             })
             .collect();
     }
-    fn reset_search(&mut self) {
+
+    fn reset_search_state(&mut self) {
         self.displaying_indices = (0..self.items.len()).collect();
         self.idx = 0;
         self.parse_current();
+    }
+
+    fn make_edit_mode(
+        parsed_file: ParsedDesktopFile,
+        file_idx: usize,
+        search_input: Option<TextArea<'static>>,
+    ) -> AppMode {
+        let mut name = TextArea::from(vec![parsed_file.name]);
+        let mut exec = TextArea::from(vec![parsed_file.exec]);
+        let mut icon = TextArea::from(vec![parsed_file.icon]);
+
+        for ta in [&mut name, &mut exec, &mut icon] {
+            ta.set_cursor_line_style(Style::default());
+            ta.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
+            ta.move_cursor(CursorMove::End);
+        }
+
+        AppMode::Edit {
+            file_idx,
+            active_field: 0,
+            textareas: vec![name, exec, icon],
+            search_input,
+        }
     }
 
     // The main run function
@@ -119,7 +144,7 @@ impl App {
                         match &mut self.mode {
                             AppMode::Browse => match key.code {
                                 KeyCode::Esc => {
-                                    self.reset_search();
+                                    self.reset_search_state();
                                 }
                                 KeyCode::Char('/') => {
                                     let mut input = TextArea::from(vec![String::new()]);
@@ -144,36 +169,17 @@ impl App {
                                 }
                                 KeyCode::Char('q') => break Ok(()),
                                 KeyCode::Enter => {
-                                    if let Some(parsed_file) = &self.parsed_file {
-                                        let mut name =
-                                            TextArea::from(vec![parsed_file.name.clone()]);
-                                        let mut exec =
-                                            TextArea::from(vec![parsed_file.exec.clone()]);
-                                        let mut icon =
-                                            TextArea::from(vec![parsed_file.icon.clone()]);
-
-                                        for ta in [&mut name, &mut exec, &mut icon] {
-                                            ta.set_cursor_line_style(Style::default());
-                                            ta.set_cursor_style(
-                                                Style::default().add_modifier(Modifier::REVERSED),
-                                            );
-                                            ta.move_cursor(CursorMove::End)
-                                        }
-
-                                        self.mode = AppMode::Edit {
-                                            file_idx: self.idx,
-                                            active_field: 0,
-                                            textareas: vec![name, exec, icon],
-                                        }
+                                    if let Some(parsed_file) = self.parsed_file.clone() {
+                                        self.mode =
+                                            Self::make_edit_mode(parsed_file, self.idx, None);
                                     }
                                 }
                                 _ => {}
                             },
                             AppMode::Search { input } => match key.code {
-                                // TODO: Complete all inputs... Me need some thinking for what keys me needs, just placeholders for now
                                 KeyCode::Esc => {
                                     self.mode = AppMode::Browse;
-                                    self.reset_search();
+                                    self.reset_search_state();
                                 }
                                 KeyCode::Char('j') | KeyCode::Down => {
                                     if !self.items.is_empty() {
@@ -187,26 +193,16 @@ impl App {
                                     self.parse_current();
                                 }
                                 KeyCode::Enter => {
-                                    if let Some(parsed_file) = &self.parsed_file {
-                                        let mut name =
-                                            TextArea::from(vec![parsed_file.name.clone()]);
-                                        let mut exec =
-                                            TextArea::from(vec![parsed_file.exec.clone()]);
-                                        let mut icon =
-                                            TextArea::from(vec![parsed_file.icon.clone()]);
-
-                                        for ta in [&mut name, &mut exec, &mut icon] {
-                                            ta.set_cursor_line_style(Style::default());
-                                            ta.set_cursor_style(
-                                                Style::default().add_modifier(Modifier::REVERSED),
+                                    // Map filtered index back to real index and enter edit mode (search -> edit).
+                                    if let Some(real_idx) =
+                                        self.displaying_indices.get(self.idx).copied()
+                                    {
+                                        if let Some(parsed_file) = self.parsed_file.clone() {
+                                            self.mode = Self::make_edit_mode(
+                                                parsed_file,
+                                                real_idx,
+                                                Some(input.clone()),
                                             );
-                                            ta.move_cursor(CursorMove::End)
-                                        }
-
-                                        self.mode = AppMode::Edit {
-                                            file_idx: self.idx,
-                                            active_field: 0,
-                                            textareas: vec![name, exec, icon],
                                         }
                                     }
                                 }
@@ -224,7 +220,7 @@ impl App {
                                 file_idx,
                                 active_field,
                                 textareas,
-                                ..
+                                search_input,
                             } => match key.code {
                                 KeyCode::Tab | KeyCode::Down => {
                                     *active_field = (*active_field + 1) % textareas.len();
@@ -232,7 +228,15 @@ impl App {
                                 KeyCode::Up => {
                                     *active_field = active_field.saturating_sub(1);
                                 }
-                                KeyCode::Esc => self.mode = AppMode::Browse,
+                                KeyCode::Esc => {
+                                    if let Some(search_input) = search_input.take() {
+                                        self.mode = AppMode::Search {
+                                            input: search_input,
+                                        };
+                                    } else {
+                                        self.mode = AppMode::Browse;
+                                    }
+                                }
                                 KeyCode::Enter => {
                                     let new_name = textareas[0].lines()[0].clone();
                                     let new_exec = textareas[1].lines()[0].clone();
