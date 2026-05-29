@@ -2,7 +2,7 @@
 A small TUI app written in rust to edit `.desktop` files for your app launcher on the go.
 Built using **Ratatui** & **Crossterm-backend**
 
-![showcase](showcase.gif)
+![showcase](assets/showcase.gif)
 
 ## Installation
 I havent yet published on Cargo so for now...

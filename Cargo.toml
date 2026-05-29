@@ -6,6 +6,7 @@ repository = "https://github.com/chishxd/desktop-file-editor"
 readme = "README.md"
 version = "0.1.0"
 edition = "2024"
+exclude = ["assets/*"]
 
 [dependencies]
 crossterm = "0.29.0"
